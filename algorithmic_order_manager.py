@@ -15,7 +15,7 @@ class AlgorithmicOrderManager:
         # Simulated market volatility index (0.15 = 15% Quiet, 0.45 = 45% Panic)
         self.market_volatility = 0.15 
         
-        # PORTFOLIO STATE TRACKER: Tracks active inventory exposure across the session
+        # PORTFOLIO STATE TRACKER: Tracks inventory, cost basis, and realized profits
         self.portfolio = {}
 
     def update_market_conditions(self, new_volatility):
@@ -68,23 +68,30 @@ class AlgorithmicOrderManager:
         # Determine venue route dynamically
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
 
-        # Update portfolio state if the order passes risk checks
+        # Initialize asset track if not present
         symbol = symbol.upper()
         if symbol not in self.portfolio:
-            self.portfolio[symbol] = {"total_quantity": 0, "total_cost": 0.0, "avg_price": 0.0}
+            self.portfolio[symbol] = {"total_quantity": 0, "avg_price": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0}
             
-        trade_value = quantity * market_price
-        
-        # Safe inline position modification matrices
-        qty_modifier = quantity if side.upper() == "BUY" else -quantity
-        cost_modifier = trade_value if side.upper() == "BUY" else -trade_value
-        
-        self.portfolio[symbol]["total_quantity"] += qty_modifier
-        self.portfolio[symbol]["total_cost"] += cost_modifier
+        is_buy = side.upper() == "BUY"
+        current_qty = self.portfolio[symbol]["total_quantity"]
+        current_avg = self.portfolio[symbol]["avg_price"]
 
-        # Recalculate cost basis metrics inline
-        has_shares = self.portfolio[symbol]["total_quantity"] > 0
-        self.portfolio[symbol]["avg_price"] = round(self.portfolio[symbol]["total_cost"] / self.portfolio[symbol]["total_quantity"], 2) if has_shares else 0.0
+        # Calculate Realized PnL on Sells, or update Avg Price on Buys inline
+        realized_gain = ((market_price - current_avg) * quantity) if (not is_buy and current_qty >= quantity) else 0.0
+        new_qty = (current_qty + quantity) if is_buy else (current_qty - quantity)
+        
+        # Update average execution price strictly on accumulation (Buys)
+        new_avg = round(((current_qty * current_avg) + (quantity * market_price)) / new_qty, 2) if (is_buy and new_qty > 0) else current_avg
+        new_avg = 0.0 if new_qty == 0 else new_avg
+
+        # Commit updates to state tracking ledger
+        self.portfolio[symbol]["total_quantity"] = new_qty
+        self.portfolio[symbol]["avg_price"] = new_avg
+        self.portfolio[symbol]["realized_pnl"] += round(realized_gain, 2)
+        
+        # Mark-to-Market (MtM) Unrealized PnL Calculation
+        self.portfolio[symbol]["unrealized_pnl"] = round((market_price - new_avg) * new_qty, 2) if new_qty > 0 else 0.0
 
         telemetry = {
             "order_id": order_id,
@@ -94,9 +101,12 @@ class AlgorithmicOrderManager:
             "execution_price": market_price,
             "assigned_venue": target_venue,
             "status": "FILLED",
-            "market_volatility": f"{self.market_volatility * 100:.1f}%",
-            "current_position": self.portfolio[symbol]["total_quantity"],
-            "avg_execution_price": self.portfolio[symbol]["avg_price"]
+            "position_state": {
+                "current_inventory": self.portfolio[symbol]["total_quantity"],
+                "avg_cost_basis": self.portfolio[symbol]["avg_price"],
+                "unrealized_mtm_pnl": self.portfolio[symbol]["unrealized_pnl"],
+                "realized_booked_pnl": self.portfolio[symbol]["realized_pnl"]
+            }
         }
 
         logging.info(f"COMPLIANCE TELEMETRY TRACE: {json.dumps(telemetry, indent=2)}")
@@ -117,13 +127,14 @@ if __name__ == "__main__":
     
     manager.load_policy_dsl(v2_policy_dsl)
 
-    print("\n=== TRADE 1: INITIAL POSITION ===")
-    manager.update_market_conditions(0.15)
+    print("\n=== STAGE 1: ACCUMULATION ===")
     manager.process_order("ORD-003", "AAPL", "BUY", 10000, 180.00)
-
-    print("\n=== TRADE 2: ACCUMULATING MORE SHARES AT HIGHER PRICE ===")
     manager.process_order("ORD-004", "AAPL", "BUY", 15000, 185.00)
 
-    print("\n=== TRADE 3: RISK HALT TRIGGERED IN TURMOIL ===")
+    print("\n=== STAGE 2: MARKET RALLIES & WE SCALE OUT ===")
+    # Market jumps to 195.00. We sell 10,000 shares to book a profit.
+    manager.process_order("ORD-005", "AAPL", "SELL", 10000, 195.00)
+
+    print("\n=== STAGE 3: VOLATILITY SHOCK intercepted ===")
     manager.update_market_conditions(0.45)
-    manager.process_order("ORD-005", "AAPL", "BUY", 25000, 178.50)
+    manager.process_order("ORD-006", "AAPL", "BUY", 25000, 178.50)
