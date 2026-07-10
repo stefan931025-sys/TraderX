@@ -12,10 +12,7 @@ class AlgorithmicOrderManager:
         self.active_policy = None
         self.active_policy_version = None
         self.order_book = {}
-        # Simulated market volatility index (0.15 = 15% Quiet, 0.45 = 45% Panic)
         self.market_volatility = 0.15 
-        
-        # PORTFOLIO STATE TRACKER: Tracks inventory, cost basis, and realized profits
         self.portfolio = {}
 
     def update_market_conditions(self, new_volatility):
@@ -34,7 +31,6 @@ class AlgorithmicOrderManager:
             old_version = self.active_policy_version
             self.active_policy = policy_data
             self.active_policy_version = policy_data["version"]
-            
             logging.info(f"HOT-SWAP SUCCESSFUL: Upgraded policy from v({old_version}) to v({self.active_policy_version})")
             return True
         except (json.JSONDecodeError, ValueError) as e:
@@ -43,13 +39,11 @@ class AlgorithmicOrderManager:
 
     def process_order(self, order_id, symbol, side, quantity, market_price):
         if not self.active_policy:
-            logging.warning(f"Execution Halted: No active execution policy loaded to process order {order_id}.")
+            logging.warning(f"Execution Halted: No active execution policy loaded.")
             return None
 
-        # QUANT RISK GUARDRAIL: Calculate risk-adjusted maximum allowed order size
+        # QUANT RISK GUARDRAIL
         base_max_allowed = self.active_policy.get("max_order_size", 10000)
-        
-        # MOBILE-SAFE QUANT FEED: Calculates factor inline to guarantee error-free execution
         risk_factor = (0.20 / self.market_volatility) if self.market_volatility > 0.20 else 1.0
         dynamic_max_allowed = int(base_max_allowed * risk_factor)
 
@@ -58,18 +52,14 @@ class AlgorithmicOrderManager:
                 "order_id": order_id,
                 "status": "REJECTED_BY_RISK",
                 "market_volatility": f"{self.market_volatility * 100:.1f}%",
-                "base_limit": base_max_allowed,
-                "risk_adjusted_limit": dynamic_max_allowed,
-                "reason": f"Quantity ({quantity}) exceeds risk-adjusted limit of {dynamic_max_allowed} under current volatility."
+                "reason": f"Quantity ({quantity}) exceeds risk-adjusted limit of {dynamic_max_allowed}."
             }
             logging.warning(f"RISK TELEMETRY TRACE: {json.dumps(telemetry)}")
             return telemetry
 
-        # Determine venue route dynamically
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
-
-        # Initialize asset track if not present
         symbol = symbol.upper()
+        
         if symbol not in self.portfolio:
             self.portfolio[symbol] = {"total_quantity": 0, "avg_price": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0}
             
@@ -77,20 +67,15 @@ class AlgorithmicOrderManager:
         current_qty = self.portfolio[symbol]["total_quantity"]
         current_avg = self.portfolio[symbol]["avg_price"]
 
-        # Calculate Realized PnL on Sells, or update Avg Price on Buys inline
         realized_gain = ((market_price - current_avg) * quantity) if (not is_buy and current_qty >= quantity) else 0.0
         new_qty = (current_qty + quantity) if is_buy else (current_qty - quantity)
         
-        # Update average execution price strictly on accumulation (Buys)
         new_avg = round(((current_qty * current_avg) + (quantity * market_price)) / new_qty, 2) if (is_buy and new_qty > 0) else current_avg
         new_avg = 0.0 if new_qty == 0 else new_avg
 
-        # Commit updates to state tracking ledger
         self.portfolio[symbol]["total_quantity"] = new_qty
         self.portfolio[symbol]["avg_price"] = new_avg
         self.portfolio[symbol]["realized_pnl"] += round(realized_gain, 2)
-        
-        # Mark-to-Market (MtM) Unrealized PnL Calculation
         self.portfolio[symbol]["unrealized_pnl"] = round((market_price - new_avg) * new_qty, 2) if new_qty > 0 else 0.0
 
         telemetry = {
@@ -108,9 +93,36 @@ class AlgorithmicOrderManager:
                 "realized_booked_pnl": self.portfolio[symbol]["realized_pnl"]
             }
         }
-
         logging.info(f"COMPLIANCE TELEMETRY TRACE: {json.dumps(telemetry, indent=2)}")
         return telemetry
+
+    def execute_twap_order(self, symbol, side, total_quantity, time_slices, simulated_prices):
+        """
+        TWAP EXECUTION ENGINE:
+        Breaks down a massive parent block order into uniform child execution slices 
+        to mitigate market footprint and tracking error.
+        """
+        logging.info(f"\n=======================================================")
+        logging.info(f"INITIATING TWAP ALGORITHMIC LAYER: {side} {total_quantity} shares of {symbol.upper()}")
+        logging.info(f"Slicing Strategy: {time_slices} intervals | Price Array Feed Active")
+        logging.info(f"=======================================================\n")
+        
+        # Calculate individual slice size
+        slice_qty = math.floor(total_quantity / time_slices)
+        remaining_qty = total_quantity % time_slices
+        
+        for i in range(time_slices):
+            slice_id = f"TWAP-CHILD-{uuid.uuid4().hex[:6].upper()}"
+            current_market_price = simulated_prices[i] if i < len(simulated_prices) else simulated_prices[-1]
+            
+            # Append left-over odd lots to the final slice execution lot
+            current_slice_qty = slice_qty + remaining_qty if (i == time_slices - 1) else slice_qty
+            
+            logging.info(f">> [INTERVAL {i+1}/{time_slices}] Routing Child Slice...")
+            self.process_order(slice_id, symbol, side, current_slice_qty, current_market_price)
+            
+            # Simulated matching engine latency spacing
+            time.sleep(0.1)
 
 if __name__ == "__main__":
     manager = AlgorithmicOrderManager()
@@ -127,14 +139,8 @@ if __name__ == "__main__":
     
     manager.load_policy_dsl(v2_policy_dsl)
 
-    print("\n=== STAGE 1: ACCUMULATION ===")
-    manager.process_order("ORD-003", "AAPL", "BUY", 10000, 180.00)
-    manager.process_order("ORD-004", "AAPL", "BUY", 15000, 185.00)
-
-    print("\n=== STAGE 2: MARKET RALLIES & WE SCALE OUT ===")
-    # Market jumps to 195.00. We sell 10,000 shares to book a profit.
-    manager.process_order("ORD-005", "AAPL", "SELL", 10000, 195.00)
-
-    print("\n=== STAGE 3: VOLATILITY SHOCK intercepted ===")
-    manager.update_market_conditions(0.45)
-    manager.process_order("ORD-006", "AAPL", "BUY", 25000, 178.50)
+    # Simulated market price feed shifting upward during execution window
+    market_price_evolution = [180.00, 180.50, 181.25, 182.00]
+    
+    # Execute an institutional order of 40,000 shares across 4 intervals
+    manager.execute_twap_order("AAPL", "BUY", 40000, 4, market_price_evolution)
