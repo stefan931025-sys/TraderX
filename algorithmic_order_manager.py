@@ -69,7 +69,6 @@ class AlgorithmicOrderManager:
         # Determine venue route dynamically
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
 
-        # FIX: Changed opening parenthesis to curly brace
         telemetry = {
             "order_id": order_id,
             "symbol": symbol,
