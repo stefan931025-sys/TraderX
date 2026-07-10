@@ -16,7 +16,6 @@ class AlgorithmicOrderManager:
         self.market_volatility = 0.15 
         
         # PORTFOLIO STATE TRACKER: Tracks active inventory exposure across the session
-        # Structure: { "SYMBOL": {"total_quantity": int, "total_cost": float, "avg_price": float} }
         self.portfolio = {}
 
     def update_market_conditions(self, new_volatility):
@@ -50,11 +49,9 @@ class AlgorithmicOrderManager:
         # QUANT RISK GUARDRAIL: Calculate risk-adjusted maximum allowed order size
         base_max_allowed = self.active_policy.get("max_order_size", 10000)
         
-        # MOBILE-IMMUNE RISK CALCULATION (Uses inline logic to prevent spacing errors)
-        if self.market_volatility > 0.20:
-            risk_factor = 0.20 / self.market_volatility; dynamic_max_allowed = int(base_max_allowed * risk_factor)
-        else:
-            dynamic_max_allowed = base_max_allowed
+        # MOBILE-SAFE QUANT FEED: Calculates factor inline to guarantee error-free execution
+        risk_factor = (0.20 / self.market_volatility) if self.market_volatility > 0.20 else 1.0
+        dynamic_max_allowed = int(base_max_allowed * risk_factor)
 
         if quantity > dynamic_max_allowed:
             telemetry = {
@@ -71,24 +68,23 @@ class AlgorithmicOrderManager:
         # Determine venue route dynamically
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
 
-        # Update portfolio state if the order goes through
+        # Update portfolio state if the order passes risk checks
         symbol = symbol.upper()
         if symbol not in self.portfolio:
             self.portfolio[symbol] = {"total_quantity": 0, "total_cost": 0.0, "avg_price": 0.0}
             
         trade_value = quantity * market_price
-        if side.upper() == "BUY":
-            self.portfolio[symbol]["total_quantity"] += quantity
-            self.portfolio[symbol]["total_cost"] += trade_value
-        elif side.upper() == "SELL":
-            self.portfolio[symbol]["total_quantity"] -= quantity
-            self.portfolio[symbol]["total_cost"] -= trade_value
+        
+        # Safe inline position modification matrices
+        qty_modifier = quantity if side.upper() == "BUY" else -quantity
+        cost_modifier = trade_value if side.upper() == "BUY" else -trade_value
+        
+        self.portfolio[symbol]["total_quantity"] += qty_modifier
+        self.portfolio[symbol]["total_cost"] += cost_modifier
 
-        # Recalculate cost basis metrics
-        if self.portfolio[symbol]["total_quantity"] > 0:
-            self.portfolio[symbol]["avg_price"] = round(self.portfolio[symbol]["total_cost"] / self.portfolio[symbol]["total_quantity"], 2)
-        else:
-            self.portfolio[symbol]["avg_price"] = 0.0
+        # Recalculate cost basis metrics inline
+        has_shares = self.portfolio[symbol]["total_quantity"] > 0
+        self.portfolio[symbol]["avg_price"] = round(self.portfolio[symbol]["total_cost"] / self.portfolio[symbol]["total_quantity"], 2) if has_shares else 0.0
 
         telemetry = {
             "order_id": order_id,
@@ -126,10 +122,8 @@ if __name__ == "__main__":
     manager.process_order("ORD-003", "AAPL", "BUY", 10000, 180.00)
 
     print("\n=== TRADE 2: ACCUMULATING MORE SHARES AT HIGHER PRICE ===")
-    # Accumulate more shares as price moves up
     manager.process_order("ORD-004", "AAPL", "BUY", 15000, 185.00)
 
     print("\n=== TRADE 3: RISK HALT TRIGGERED IN TURMOIL ===")
     manager.update_market_conditions(0.45)
-    # This trade fails risk limits, portfolio tracking metrics should remain unchanged
     manager.process_order("ORD-005", "AAPL", "BUY", 25000, 178.50)
