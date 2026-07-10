@@ -14,6 +14,10 @@ class AlgorithmicOrderManager:
         self.order_book = {}
         # Simulated market volatility index (0.15 = 15% Quiet, 0.45 = 45% Panic)
         self.market_volatility = 0.15 
+        
+        # PORTFOLIO STATE TRACKER: Tracks active inventory exposure across the session
+        # Structure: { "SYMBOL": {"total_quantity": int, "total_cost": float, "avg_price": float} }
+        self.portfolio = {}
 
     def update_market_conditions(self, new_volatility):
         """Simulates updating the live market volatility feed."""
@@ -67,6 +71,25 @@ class AlgorithmicOrderManager:
         # Determine venue route dynamically
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
 
+        # Update portfolio state if the order goes through
+        symbol = symbol.upper()
+        if symbol not in self.portfolio:
+            self.portfolio[symbol] = {"total_quantity": 0, "total_cost": 0.0, "avg_price": 0.0}
+            
+        trade_value = quantity * market_price
+        if side.upper() == "BUY":
+            self.portfolio[symbol]["total_quantity"] += quantity
+            self.portfolio[symbol]["total_cost"] += trade_value
+        elif side.upper() == "SELL":
+            self.portfolio[symbol]["total_quantity"] -= quantity
+            self.portfolio[symbol]["total_cost"] -= trade_value
+
+        # Recalculate cost basis metrics
+        if self.portfolio[symbol]["total_quantity"] > 0:
+            self.portfolio[symbol]["avg_price"] = round(self.portfolio[symbol]["total_cost"] / self.portfolio[symbol]["total_quantity"], 2)
+        else:
+            self.portfolio[symbol]["avg_price"] = 0.0
+
         telemetry = {
             "order_id": order_id,
             "symbol": symbol,
@@ -76,8 +99,8 @@ class AlgorithmicOrderManager:
             "assigned_venue": target_venue,
             "status": "FILLED",
             "market_volatility": f"{self.market_volatility * 100:.1f}%",
-            "policy_applied": self.active_policy["policy_name"],
-            "explainability_notes": f"Vol-adjusted cap was {dynamic_max_allowed}. Route assigned via DSL ruleset."
+            "current_position": self.portfolio[symbol]["total_quantity"],
+            "avg_execution_price": self.portfolio[symbol]["avg_price"]
         }
 
         logging.info(f"COMPLIANCE TELEMETRY TRACE: {json.dumps(telemetry, indent=2)}")
@@ -98,10 +121,15 @@ if __name__ == "__main__":
     
     manager.load_policy_dsl(v2_policy_dsl)
 
-    print("\n=== SCENARIO 1: NORMAL VOLATILITY (15%) ===")
+    print("\n=== TRADE 1: INITIAL POSITION ===")
     manager.update_market_conditions(0.15)
-    manager.process_order("ORD-003", "AAPL", "BUY", 30000, 180.25)
+    manager.process_order("ORD-003", "AAPL", "BUY", 10000, 180.00)
 
-    print("\n=== SCENARIO 2: MARKET TURMOIL / VOLATILITY SPIKE (45%) ===")
+    print("\n=== TRADE 2: ACCUMULATING MORE SHARES AT HIGHER PRICE ===")
+    # Accumulate more shares as price moves up
+    manager.process_order("ORD-004", "AAPL", "BUY", 15000, 185.00)
+
+    print("\n=== TRADE 3: RISK HALT TRIGGERED IN TURMOIL ===")
     manager.update_market_conditions(0.45)
-    manager.process_order("ORD-004", "AAPL", "BUY", 30000, 178.50)
+    # This trade fails risk limits, portfolio tracking metrics should remain unchanged
+    manager.process_order("ORD-005", "AAPL", "BUY", 25000, 178.50)
