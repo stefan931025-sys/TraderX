@@ -89,28 +89,16 @@ class AlgorithmicOrderManager:
         logging.info(f"COMPLIANCE TELEMETRY TRACE: {json.dumps(telemetry)}")
         return telemetry
 
-    def execute_twap_order(self, symbol, side, total_quantity, time_slices, simulated_prices):
-        slice_qty = math.floor(total_quantity / time_slices)
-        remaining_qty = total_quantity % time_slices
-        
-        for i in range(time_slices):
-            slice_id = f"TWAP-CHILD-{uuid.uuid4().hex[:6].upper()}"
-            current_market_price = simulated_prices[i] if i < len(simulated_prices) else simulated_prices[-1]
-            current_slice_qty = slice_qty + remaining_qty if (i == time_slices - 1) else slice_qty
-            self.process_order(slice_id, symbol, side, current_slice_qty, current_market_price)
-            time.sleep(0.05)
-
-    def calculate_and_rebalance(self, target_weights, current_prices):
+    def calculate_and_rebalance(self, target_weights, current_prices, drift_threshold=0.02):
         """
-        PORTFOLIO REBALANCING ENGINE:
-        Computes total Assets Under Management (AUM), checks weight deviations,
-        and generates optimizing trades to restore target allocations.
+        PORTFOLIO REBALANCING ENGINE WITH DRIFT GUARDRAILS:
+        Checks if current weight allocations deviate past the drift_threshold bandwidth.
+        If deviation stays within the zone, trade execution is suppressed to save transaction fees.
         """
         logging.info("\n=======================================================")
-        logging.info("RUNNING PORTFOLIO REBALANCING ENGINE")
+        logging.info(f"RUNNING PORTFOLIO REBALANCING ENGINE (Threshold: {drift_threshold * 100:.1f}%)")
         logging.info("=======================================================")
         
-        # 1. Calculate current total portfolio value (Cash + Assets marked to market)
         total_value = 0.0
         for symbol, price in current_prices.items():
             qty = self.portfolio.get(symbol, {}).get("total_quantity", 0)
@@ -118,27 +106,37 @@ class AlgorithmicOrderManager:
             
         logging.info(f"Current Portfolio Mark-to-Market Total Value: ${total_value:,.2f}")
         
-        # 2. Determine target allocations vs current holdings
         for symbol, target_weight in target_weights.items():
             symbol = symbol.upper()
             price = current_prices[symbol]
             current_qty = self.portfolio.get(symbol, {}).get("total_quantity", 0)
             
-            # Calculate what we should hold versus what we currently hold
+            # Calculate current allocation weight
+            current_asset_value = current_qty * price
+            current_weight = current_asset_value / total_value if total_value > 0 else 0.0
+            
+            # Determine target metrics
             target_value_for_asset = total_value * target_weight
             target_qty = int(target_value_for_asset / price)
-            qty_variance = target_qty - current_qty
             
+            # Measure specific directional drift
+            actual_drift = abs(current_weight - target_weight)
+            
+            logging.info(f"Checking {symbol} -> Target: {target_weight*100:.1f}% | Current: {current_weight*100:.1f}% | Drift: {actual_drift*100:.1f}%")
+            
+            # Guardrail check: Is the asset drift within acceptable bounds?
+            if actual_drift <= drift_threshold:
+                logging.info(f"   [GUARDRAIL HOLD] {symbol} drift is within the {drift_threshold*100:.1f}% tolerance band. Execution suppressed.")
+                continue
+                
+            qty_variance = target_qty - current_qty
             if qty_variance == 0:
-                logging.info(f"Asset {symbol} is perfectly balanced at target weight ({target_weight*100}%).")
                 continue
                 
             side = "BUY" if qty_variance > 0 else "SELL"
             trade_qty = abs(qty_variance)
             
-            logging.info(f">> Rebalance Signal for {symbol}: Current Qty={current_qty}, Target Qty={target_qty} | Generating {side} for {trade_qty} shares.")
-            
-            # Route rebalance instruction to execution engine
+            logging.info(f"   [TRIGGERED] Drift exceeds threshold! Generating {side} order for {trade_qty} shares.")
             rebalance_id = f"REBAL-{uuid.uuid4().hex[:6].upper()}"
             self.process_order(rebalance_id, symbol, side, trade_qty, price)
 
@@ -153,22 +151,29 @@ if __name__ == "__main__":
     }"""
     manager.load_policy_dsl(v2_policy_dsl)
 
-    # Setup initial uneven positions
-    print("\n--- Establishing Initial Portfolio Positions ---")
-    manager.process_order("INIT-001", "AAPL", "BUY", 1000, 180.00)
-    manager.process_order("INIT-002", "NVDA", "BUY", 5000, 50.00)
+    # 1. Establish initial portfolio state
+    print("\n--- Establishing Positions ---")
+    manager.process_order("INIT-001", "AAPL", "BUY", 1942, 190.00) # Balanced close to target
+    manager.process_order("INIT-002", "NVDA", "BUY", 2894, 85.00)  # Balanced close to target
 
-    # Market shift occurs! Prices update.
-    current_market_prices = {
-        "AAPL": 190.00,
-        "NVDA": 85.00
+    # 2. Minor market movement scenario (Drift is minimal)
+    minor_market_prices = {
+        "AAPL": 191.00, # Up slightly
+        "NVDA": 84.50   # Down slightly
     }
-
-    # Define target strategic allocation: 60% Apple, 40% Nvidia
     strategic_target_weights = {
         "AAPL": 0.60,
         "NVDA": 0.40
     }
 
-    # Trigger structural rebalance
-    manager.calculate_and_rebalance(strategic_target_weights, current_market_prices)
+    # Run rebalance with a strict 3% drift requirement
+    manager.calculate_and_rebalance(strategic_target_weights, minor_market_prices, drift_threshold=0.03)
+
+    # 3. Aggressive market divergence scenario (Massive shift!)
+    major_market_prices = {
+        "AAPL": 160.00, # Apple plummets
+        "NVDA": 130.00  # Nvidia rockets up
+    }
+    
+    # Run engine again—this should punch right through the guardrail band
+    manager.calculate_and_rebalance(strategic_target_weights, major_market_prices, drift_threshold=0.03)
