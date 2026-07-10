@@ -12,8 +12,7 @@ class AlgorithmicOrderManager:
         self.active_policy = None
         self.active_policy_version = None
         self.order_book = {}
-        # Simulated market volatility index (e.g., annualized standard deviation of returns)
-        # 0.15 = 15% (Quiet market), 0.45 = 45% (High volatility/Panic)
+        # Simulated market volatility index (0.15 = 15% Quiet, 0.45 = 45% Panic)
         self.market_volatility = 0.15 
 
     def update_market_conditions(self, new_volatility):
@@ -47,10 +46,9 @@ class AlgorithmicOrderManager:
         # QUANT RISK GUARDRAIL: Calculate risk-adjusted maximum allowed order size
         base_max_allowed = self.active_policy.get("max_order_size", 10000)
         
-        # Sizing Penalty Formula: Scales down order size if volatility exceeds 20% baseline
+        # MOBILE-IMMUNE RISK CALCULATION (Uses inline logic to prevent spacing errors)
         if self.market_volatility > 0.20:
-            risk_factor = 0.20 / self.market_volatility
-            dynamic_max_allowed = int(base_max_allowed * risk_factor)
+            risk_factor = 0.20 / self.market_volatility; dynamic_max_allowed = int(base_max_allowed * risk_factor)
         else:
             dynamic_max_allowed = base_max_allowed
 
