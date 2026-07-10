@@ -3,6 +3,7 @@ import time
 import uuid
 import logging
 import math
+import random
 
 # Configure basic logging for telemetry tracing
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,6 +15,8 @@ class AlgorithmicOrderManager:
         self.order_book = {}
         self.market_volatility = 0.15 
         self.portfolio = {}
+        # Transaction fee structure: 5 basis points (0.0005) per execution
+        self.bps_fee_rate = 0.0005 
 
     def update_market_conditions(self, new_volatility):
         self.market_volatility = new_volatility
@@ -57,18 +60,31 @@ class AlgorithmicOrderManager:
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
         symbol = symbol.upper()
         
+        # --- MARKET SLIPPAGE & TRANSACTION COST SIMULATION ---
+        # Large quantities push prices away from us. Volatility amplifies the slippage impact.
+        slippage_factor = (quantity / dynamic_max_allowed) * self.market_volatility * 0.02
+        
+        if side.upper() == "BUY":
+            effective_price = market_price * (1.0 + slippage_factor)
+        else:
+            effective_price = market_price * (1.0 - slippage_factor)
+            
+        # Calculate exchange commission (bps fee)
+        notional_value = quantity * effective_price
+        transaction_fee = notional_value * self.bps_fee_rate
+        
         if symbol not in self.portfolio:
-            self.portfolio[symbol] = {"total_quantity": 0, "avg_price": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0}
+            self.portfolio[symbol] = {"total_quantity": 0, "avg_price": 0.0, "realized_pnl": 0.0, "unrealized_pnl": 0.0, "total_fees_paid": 0.0}
             
         is_buy = side.upper() == "BUY"
         current_qty = self.portfolio[symbol]["total_quantity"]
         current_avg = self.portfolio[symbol]["avg_price"]
 
-        realized_gain = ((market_price - current_avg) * quantity) if (not is_buy and current_qty >= quantity) else 0.0
+        realized_gain = ((effective_price - current_avg) * quantity) if (not is_buy and current_qty >= quantity) else 0.0
         
         if is_buy:
             new_qty = current_qty + quantity
-            new_avg = round(((current_qty * current_avg) + (quantity * market_price)) / new_qty, 2) if new_qty > 0 else 0.0
+            new_avg = round(((current_qty * current_avg) + (quantity * effective_price)) / new_qty, 2) if new_qty > 0 else 0.0
         else:
             new_qty = current_qty - quantity
             new_avg = current_avg if new_qty > 0 else 0.0
@@ -76,11 +92,14 @@ class AlgorithmicOrderManager:
         self.portfolio[symbol]["total_quantity"] = new_qty
         self.portfolio[symbol]["avg_price"] = new_avg
         self.portfolio[symbol]["realized_pnl"] += round(realized_gain, 2)
-        self.portfolio[symbol]["unrealized_pnl"] = round((market_price - new_avg) * new_qty, 2) if new_qty > 0 else 0.0
+        self.portfolio[symbol]["unrealized_pnl"] = round((effective_price - new_avg) * new_qty, 2) if new_qty > 0 else 0.0
+        self.portfolio[symbol]["total_fees_paid"] += round(transaction_fee, 2)
 
         telemetry = {
-            "order_id": order_id, "symbol": symbol, "side": side, "executed_quantity": quantity,
-            "execution_price": market_price, "assigned_venue": target_venue, "status": "FILLED",
+            "order_id": order_id, "symbol": symbol, "side": side, "requested_qty": quantity,
+            "mid_market_price": market_price, "effective_fill_price": round(effective_price, 2),
+            "slippage_cost": round(abs(effective_price - market_price) * quantity, 2),
+            "commission_fee": round(transaction_fee, 2), "assigned_venue": target_venue, "status": "FILLED",
             "position_state": {
                 "current_inventory": self.portfolio[symbol]["total_quantity"],
                 "avg_cost_basis": self.portfolio[symbol]["avg_price"]
@@ -90,11 +109,6 @@ class AlgorithmicOrderManager:
         return telemetry
 
     def calculate_and_rebalance(self, target_weights, current_prices, drift_threshold=0.02):
-        """
-        PORTFOLIO REBALANCING ENGINE WITH DRIFT GUARDRAILS:
-        Checks if current weight allocations deviate past the drift_threshold bandwidth.
-        If deviation stays within the zone, trade execution is suppressed to save transaction fees.
-        """
         logging.info("\n=======================================================")
         logging.info(f"RUNNING PORTFOLIO REBALANCING ENGINE (Threshold: {drift_threshold * 100:.1f}%)")
         logging.info("=======================================================")
@@ -111,22 +125,17 @@ class AlgorithmicOrderManager:
             price = current_prices[symbol]
             current_qty = self.portfolio.get(symbol, {}).get("total_quantity", 0)
             
-            # Calculate current allocation weight
             current_asset_value = current_qty * price
             current_weight = current_asset_value / total_value if total_value > 0 else 0.0
             
-            # Determine target metrics
             target_value_for_asset = total_value * target_weight
             target_qty = int(target_value_for_asset / price)
-            
-            # Measure specific directional drift
             actual_drift = abs(current_weight - target_weight)
             
             logging.info(f"Checking {symbol} -> Target: {target_weight*100:.1f}% | Current: {current_weight*100:.1f}% | Drift: {actual_drift*100:.1f}%")
             
-            # Guardrail check: Is the asset drift within acceptable bounds?
             if actual_drift <= drift_threshold:
-                logging.info(f"   [GUARDRAIL HOLD] {symbol} drift is within the {drift_threshold*100:.1f}% tolerance band. Execution suppressed.")
+                logging.info(f"   [GUARDRAIL HOLD] {symbol} drift is within tolerance. Execution suppressed.")
                 continue
                 
             qty_variance = target_qty - current_qty
@@ -145,35 +154,27 @@ if __name__ == "__main__":
 
     v2_policy_dsl = """{
         "policy_name": "High-Volume Institutional Venue Routing Policy",
-        "version": "2.0.0",
-        "max_order_size": 100000,
+        "version": "2.5.0",
+        "max_order_size": 50000,
         "routing_logic": { "BUY": "INTERNAL_DARK_POOL", "SELL": "PRIMARY_LIT_MARKET" }
     }"""
     manager.load_policy_dsl(v2_policy_dsl)
 
-    # 1. Establish initial portfolio state
-    print("\n--- Establishing Positions ---")
-    manager.process_order("INIT-001", "AAPL", "BUY", 1942, 190.00) # Balanced close to target
-    manager.process_order("INIT-002", "NVDA", "BUY", 2894, 85.00)  # Balanced close to target
+    # 1. Establish initial portfolio positions
+    print("\n--- Establishing Initial Positions ---")
+    manager.process_order("INIT-001", "AAPL", "BUY", 2000, 190.00)
+    manager.process_order("INIT-002", "NVDA", "BUY", 3000, 85.00)
 
-    # 2. Minor market movement scenario (Drift is minimal)
-    minor_market_prices = {
-        "AAPL": 191.00, # Up slightly
-        "NVDA": 84.50   # Down slightly
+    # 2. Simulate a major market divergence causing real asset drift
+    major_market_prices = {
+        "AAPL": 150.00, # Drops hard
+        "NVDA": 140.00  # Rips upward
     }
     strategic_target_weights = {
         "AAPL": 0.60,
         "NVDA": 0.40
     }
-
-    # Run rebalance with a strict 3% drift requirement
-    manager.calculate_and_rebalance(strategic_target_weights, minor_market_prices, drift_threshold=0.03)
-
-    # 3. Aggressive market divergence scenario (Massive shift!)
-    major_market_prices = {
-        "AAPL": 160.00, # Apple plummets
-        "NVDA": 130.00  # Nvidia rockets up
-    }
     
-    # Run engine again—this should punch right through the guardrail band
+    # Run engine—this will push past the 3% guardrail and track friction costs
     manager.calculate_and_rebalance(strategic_target_weights, major_market_prices, drift_threshold=0.03)
+        
