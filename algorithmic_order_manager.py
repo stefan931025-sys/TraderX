@@ -45,7 +45,6 @@ class AlgorithmicOrderManager:
             return None
 
         # QUANT RISK GUARDRAIL: Calculate risk-adjusted maximum allowed order size
-        # If volatility doubles, the allowed order size cuts down significantly
         base_max_allowed = self.active_policy.get("max_order_size", 10000)
         
         # Sizing Penalty Formula: Scales down order size if volatility exceeds 20% baseline
@@ -70,6 +69,7 @@ class AlgorithmicOrderManager:
         # Determine venue route dynamically
         target_venue = self.active_policy["routing_logic"].get(side.upper(), "DARK_POOL")
 
+        # FIX: Changed opening parenthesis to curly brace
         telemetry = {
             "order_id": order_id,
             "symbol": symbol,
@@ -103,12 +103,8 @@ if __name__ == "__main__":
 
     print("\n=== SCENARIO 1: NORMAL VOLATILITY (15%) ===")
     manager.update_market_conditions(0.15)
-    # A large institutional block order of 30,000 shares
     manager.process_order("ORD-003", "AAPL", "BUY", 30000, 180.25)
 
     print("\n=== SCENARIO 2: MARKET TURMOIL / VOLATILITY SPIKE (45%) ===")
-    # Volatility spikes due to unexpected macro data
     manager.update_market_conditions(0.45)
-    # Trying to send the exact same 30,000 share block order during panic conditions
     manager.process_order("ORD-004", "AAPL", "BUY", 30000, 178.50)
-                    
