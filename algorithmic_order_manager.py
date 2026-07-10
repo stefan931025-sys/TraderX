@@ -64,6 +64,7 @@ class AlgorithmicOrderManager:
         # Large quantities push prices away from us. Volatility amplifies the slippage impact.
         slippage_factor = (quantity / dynamic_max_allowed) * self.market_volatility * 0.02
         
+        # FIXED: BUY orders push execution price UP; SELL orders push execution price DOWN
         if side.upper() == "BUY":
             effective_price = market_price * (1.0 + slippage_factor)
         else:
@@ -177,4 +178,3 @@ if __name__ == "__main__":
     
     # Run engine—this will push past the 3% guardrail and track friction costs
     manager.calculate_and_rebalance(strategic_target_weights, major_market_prices, drift_threshold=0.03)
-        
