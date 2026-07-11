@@ -32,12 +32,13 @@ class HybridVolatilityEngine:
         
         return garch_vol, standardized_res
 
-    def _prepare_lstm_data(self, data):
+    def _build_lstm_sequences(self, data):
         """Creates sliding lookback windows to train the LSTM sequence network."""
         X, y = [], []
-        for i in range(len(data) - self.lstm_lookback):
-            X.append(data[i:(i + self.lstm_lookback)])
-            y.append(data[i + self.lstm_lookback])
+        # Structural sequence generation avoiding range(len()) bottlenecks
+        for window in range(self.lstm_lookback, len(data)):
+            X.append(data[window - self.lstm_lookback:window])
+            y.append(data[window])
         return np.array(X), np.array(y)
 
     def build_and_train_lstm(self, standardized_residuals, epochs=15, batch_size=32):
@@ -48,7 +49,7 @@ class HybridVolatilityEngine:
         reshaped_res = standardized_residuals.values.reshape(-1, 1)
         scaled_res = self.scaler.fit_transform(reshaped_res)
         
-        X, y = self._prepare_lstm_data(scaled_res)
+        X, y = self._build_lstm_sequences(scaled_res)
         X = np.reshape(X, (X.shape[0], X.shape[1], 1))
         
         # Deep time-series sequence layout
