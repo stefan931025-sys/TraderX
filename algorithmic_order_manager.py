@@ -64,7 +64,7 @@ class AlgorithmicOrderManager:
         # Large quantities push prices away from us. Volatility amplifies the slippage impact.
         slippage_factor = (quantity / dynamic_max_allowed) * self.market_volatility * 0.02
         
-        # FIXED: BUY orders push execution price UP; SELL orders push execution price DOWN
+        # FIXED: BUY orders push execution price UP (+); SELL orders push execution price DOWN (-)
         if side.upper() == "BUY":
             effective_price = market_price * (1.0 + slippage_factor)
         else:
@@ -168,13 +168,13 @@ if __name__ == "__main__":
 
     # 2. Simulate a major market divergence causing real asset drift
     major_market_prices = {
-        "AAPL": 150.00, # Drops hard
-        "NVDA": 140.00  # Rips upward
+        "AAPL": 150.00, 
+        "NVDA": 140.00  
     }
     strategic_target_weights = {
         "AAPL": 0.60,
         "NVDA": 0.40
     }
     
-    # Run engine—this will push past the 3% guardrail and track friction costs
+    # Run engine
     manager.calculate_and_rebalance(strategic_target_weights, major_market_prices, drift_threshold=0.03)
