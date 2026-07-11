@@ -90,4 +90,4 @@ class HybridVolatilityEngine:
         # Hybrid Synthesis optimization rule
         hybrid_vol_forecast = next_day_garch_vol * (1 + abs(predicted_res))
         return hybrid_vol_forecast
-  
+        
