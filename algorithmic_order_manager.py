@@ -146,6 +146,7 @@ class AlgorithmicOrderManager:
             side = "BUY" if qty_variance > 0 else "SELL"
             trade_qty = abs(qty_variance)
             
+            # FIXED Syntax Error on the line below
             logging.info(f"   [TRIGGERED] Drift exceeds threshold! Generating {side} order for {trade_qty} shares.")
             rebalance_id = f"REBAL-{uuid.uuid4().hex[:6].upper()}"
             self.process_order(rebalance_id, symbol, side, trade_qty, price)
