@@ -8,11 +8,12 @@ class AlgorithmicOrderManager:
     An institutional execution system that optimizes order slicing and volume 
     participation based on dynamic GARCH-LSTM volatility forecasts.
     """
+    
     def __init__(self, target_participation_rate=0.10):
         self.target_rate = target_participation_rate
         self.data_stream = MarketDataStream()
         self.vol_engine = HybridVolatilityEngine()
-
+        
     def calculate_dynamic_order_size(self, market_volume, current_returns):
         """
         Processes historical returns to compute step-ahead volatility projections, 
@@ -48,9 +49,9 @@ class AlgorithmicOrderManager:
         # Generate structural regime data from the stream
         market_df = self.data_stream.generate_regime_switching_data(n_days=historical_days)
         
-        print("==================================================================")
-        print("          INITIALIZING HYBRID VOLATILITY ORDER MANAGEMENT         ")
-        print("==================================================================")
+        print("==========================================================================")
+        print("                 INITIALIZING HYBRID VOLATILITY ORDER MANAGEMENT          ")
+        print("==========================================================================")
         
         # Run execution loop on the most recent slice of data
         lookback = 100
@@ -66,7 +67,7 @@ class AlgorithmicOrderManager:
         print(f"Current Target Volume: {latest_volume:,.0f} shares")
         print(f"Forecasted Hybrid Volatility: {forecasted_vol * 100:.2f}%")
         print(f"Risk-Adjusted Order Allocation Size: {order_size:,} shares")
-        print("==================================================================")
+        print("==========================================================================")
         
         return order_size
 
