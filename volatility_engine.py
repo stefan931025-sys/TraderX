@@ -7,10 +7,11 @@ from sklearn.preprocessing import MinMaxScaler
 
 class HybridVolatilityEngine:
     """
-    An institutional-grade volatility forecasting engine that combines 
+    An institutional-grade volatility forecasting engine that combines
     a statistical GARCH(1,1) model with an LSTM neural network to predict
     dynamic market regimes and daily implied volatility.
     """
+    
     def __init__(self, lstm_lookback=20):
         self.lstm_lookback = lstm_lookback
         self.scaler = MinMaxScaler(feature_range=(0, 1))
@@ -31,7 +32,7 @@ class HybridVolatilityEngine:
         standardized_res = garch_res.resid / garch_res.conditional_volatility
         
         return garch_vol, standardized_res
-
+        
     def _build_lstm_sequences(self, data):
         """Creates sliding lookback windows to train the LSTM sequence network."""
         X, y = [], []
@@ -40,7 +41,7 @@ class HybridVolatilityEngine:
             X.append(data[window - self.lstm_lookback:window])
             y.append(data[window])
         return np.array(X), np.array(y)
-
+        
     def build_and_train_lstm(self, standardized_residuals, epochs=15, batch_size=32):
         """
         Trains an LSTM network to isolate non-linear clustering patterns
@@ -65,7 +66,7 @@ class HybridVolatilityEngine:
         model.compile(optimizer='adam', loss='mean_squared_error')
         model.fit(X, y, epochs=epochs, batch_size=batch_size, verbose=0)
         self.lstm_model = model
-
+        
     def forecast_next_day_volatility(self, returns, garch_vol, standardized_residuals):
         """
         Synthesizes the linear GARCH projection with the non-linear LSTM
