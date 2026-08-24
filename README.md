@@ -1,3 +1,5 @@
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/stefan931025-sys/TraderX)
+
 # TraderX: Institutional Portfolio Rebalancer & Hybrid Volatility Execution Engine
 
 TraderX is an advanced quantitative execution framework that combines classical financial econometrics with deep sequence neural networks to dynamically optimize order slicing and execution algorithms. By decoupling structural volatility estimation from machine learning sequence layers, the system prevents execution degradation during rapid market regime shifts.
